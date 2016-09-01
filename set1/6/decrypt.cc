@@ -1,6 +1,7 @@
 #include <string>
 #include <vector>
 #include "base64.h"
+#include "repkey_xor.h"
 
 int get_one_v2(const bool eof_is_error) {
   int c = getchar();
@@ -48,130 +49,19 @@ int hamming_distance(const std::string &a, const std::string &b) {
   return distance;
 }
 
-bool is_valid(int c) {
-  return isprint(c) || isspace(c);
-}
-
-int compute_frequencies(const std::string &s, std::vector<int> *frequencies) {
-  bool has_nonprint = false;
-
-  for (const unsigned char c: s) {
-    ++(*frequencies)[c];
-    if (!is_valid(c))
-      has_nonprint = true;
-  }
-
-  if (has_nonprint)
-    // score is 0 if non-print chars are present
-    return 0;
-
-  // try and compute a reasonable score; give 1 base point to all
-  // chars, then 1 additional point for all letters or spaces, and 1
-  // other additional point for the 5 more common letters in english
-  // text (e, t, a, o, i)
-  int score = s.size(); // 1 base point
-  // ascii is 7 bits
-  for (unsigned char c = 0; c < 0x7f; ++c) {
-    if (!isalpha(c) && c != ' ')
-      continue;
-
-    switch (tolower(c)) {
-      case 'e':
-      case 't':
-      case 'a':
-      case 'o':
-      case 'i':
-        // 2 extra points
-        score += (*frequencies)[c] * 2;
-        break;
-
-      default:
-        // 1 extra point
-        score += (*frequencies)[c];
-        break;
-    }
-  }
-  return score;
-}
-
-void print_frequencies(const std::vector<int> &frequencies) {
-  for (unsigned int i = 0; i < frequencies.size(); ++i) {
-    if (!frequencies[i])
-      continue;
-
-    fprintf(stderr, "  %d (", i);
-    if (isprint(i))
-      fprintf(stderr, "%c", i);
-    else
-      fprintf(stderr, "nonprint");
-    fprintf(stderr, "): %d times\n", frequencies[i]);
-  }
-}
-
-std::string xor_one(const std::string &buf, int int_mask) {
-  std::string result(buf);
-
-  unsigned char mask = int_mask & 0x000000ff;
-  const size_t size = result.size();
-  for (size_t i = 0; i < size; ++i) {
-    result[i] = result[i] ^ mask;
-  }
-
-  return std::move(result);
-}
-
-int try_all_xors(const std::string &buf) {
-  int highest_score = 0;
-  int mask_for_highest_score = 0;
-
-  // avoid xoring with 0
-  for (int i = 0x01; i <= 0xff; ++i) {
-    std::string xord_buffer = xor_one(buf, i);
-
-    std::vector<int> frequencies(256, 0);
-    int score = compute_frequencies(xord_buffer, &frequencies);
-
-    if (!score)
-      // skip XORs with score 0
-      continue;
-
-    fprintf(stderr, "XOR with %d (0x%x) has score: %d\n", i, i, score);
-    //print_frequencies(frequencies);
-    //printf("Result: %.*s\n", (int)xord_buffer.size(), xord_buffer.c_str());
-
-    if (score > highest_score) {
-      highest_score = score;
-      mask_for_highest_score = i;
-    }
-  }
-
-  fprintf(stderr, "Highest score was %d, obtained with mask %d (0x%x)\n",
-          highest_score, mask_for_highest_score, mask_for_highest_score);
-
-  if (!highest_score)
-    // print nothing if highest score was 0
-    return 1;
-
-  {
-    std::string xord_buffer = xor_one(buf, mask_for_highest_score);
-    std::vector<int> frequencies(256, 0);
-    compute_frequencies(xord_buffer, &frequencies);
-
-    print_frequencies(frequencies);
-    fprintf(stderr, "Result: %.*s\n", (int)xord_buffer.size(), xord_buffer.c_str());
-  }
-
-  return 0;
-}
-
 int try_find_keysize(const std::string &s) {
   int guessed_keysize = -1;
   float distance_for_guessed_keysize = 0; // the goal is to minimize this
   for (int keysize = 2; keysize < 40; ++keysize) {
     std::string chunk1(s, 0, keysize);
     std::string chunk2(s, keysize, keysize);
+    std::string chunk3(s, keysize * 2, keysize);
+    std::string chunk4(s, keysize * 3, keysize);
 
-    int distance = hamming_distance(chunk1, chunk2);
+    // use more than one sample
+    int distance = hamming_distance(chunk1, chunk2) +
+        hamming_distance(chunk2, chunk3) +
+        hamming_distance(chunk3, chunk4);
     float normalized_distance = (float)distance / keysize;
     fprintf(stderr, "Keysize [%d] generates distance [%d] (normalized %f)\n",
             keysize, distance, normalized_distance);
@@ -215,22 +105,26 @@ void transpose_blocks(const std::vector<std::string> &blocks, std::vector<std::s
   }
 }
 
-int try_decrypt(const std::string &s, const int keysize) {
+bool try_decrypt(const std::string &s, const int keysize) {
   // break the ciphertext into blocks of keysize length
   std::vector<std::string> blocks;
   break_blocks(s, keysize, &blocks);
-  fprintf(stderr, "[%ld] blocks created\n", blocks.size());
+  //fprintf(stderr, "[%ld] blocks created\n", blocks.size());
 
   // transpose the blocks
   std::vector<std::string> transposed_blocks;
   transpose_blocks(blocks, &transposed_blocks);
-  fprintf(stderr, "[%ld] transposed blocks created\n", transposed_blocks.size());
+  //fprintf(stderr, "[%ld] transposed blocks created\n", transposed_blocks.size());
 
   for (size_t transposed_block_idx = 0; transposed_block_idx < transposed_blocks.size(); ++transposed_block_idx) {
-    try_all_xors(transposed_blocks[transposed_block_idx]);
+    int one_byte_key;
+    if (!try_all_xors(transposed_blocks[transposed_block_idx], &one_byte_key)) {
+      fprintf(stderr, "Keysize [%d]: failed to guess byte [%ld] for the key\n", keysize, transposed_block_idx);
+      return false;
+    }
   }
 
-  return 0;
+  return true;
 }
 
 int main(int argc, char *argv[]) {
@@ -262,7 +156,8 @@ int main(int argc, char *argv[]) {
   }
   fprintf(stderr, "Guessed keysize of [%d]\n", keysize);
 
-  try_decrypt(decoded_input, keysize);
+  if (!try_decrypt(decoded_input, keysize))
+    return 1;
 
   return 0;
 }
