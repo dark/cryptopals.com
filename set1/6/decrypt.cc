@@ -1,7 +1,33 @@
+#include <queue>
 #include <string>
 #include <vector>
 #include "base64.h"
 #include "repkey_xor.h"
+
+class KeysizeMetadata {
+ public:
+  KeysizeMetadata(int keysize, float distance)
+      : keysize_(keysize), distance_(distance) {}
+  KeysizeMetadata(const KeysizeMetadata &other)
+      : keysize_(other.keysize_), distance_(other.distance_) {}
+
+  int keysize_;
+  float distance_;
+};
+class BetterKeysizeComparator {
+ public:
+  bool operator() (const KeysizeMetadata &lhs, const KeysizeMetadata &rhs) const {
+    // We must determine if lhs is 'better' than rhs; comparison is
+    // done on the distance.
+    //
+    // Since the priority_queue calls this class with 'less'
+    // semantics, and places 'higher' elements at the beginning (i.e.,
+    // elements for which 'less' returns false when compared to
+    // everything else), we have to reverse the logic. Hence, return
+    // whether lhs is 'worse' than rhs.
+    return lhs.distance_ > rhs.distance_;
+  }
+};
 
 int get_one_v2(const bool eof_is_error) {
   int c = getchar();
@@ -49,9 +75,10 @@ int hamming_distance(const std::string &a, const std::string &b) {
   return distance;
 }
 
-int try_find_keysize(const std::string &s) {
-  int guessed_keysize = -1;
-  float distance_for_guessed_keysize = 0; // the goal is to minimize this
+std::vector<int> try_find_keysize(const std::string &s, const size_t keysizes_count) {
+  std::priority_queue<KeysizeMetadata, std::vector<KeysizeMetadata>,
+                      BetterKeysizeComparator> keysizes_data;
+
   for (int keysize = 2; keysize < 40; ++keysize) {
     std::string chunk1(s, 0, keysize);
     std::string chunk2(s, keysize, keysize);
@@ -66,13 +93,21 @@ int try_find_keysize(const std::string &s) {
     fprintf(stderr, "Keysize [%d] generates distance [%d] (normalized %f)\n",
             keysize, distance, normalized_distance);
 
-    if (guessed_keysize == -1 || normalized_distance < distance_for_guessed_keysize) {
-      guessed_keysize = keysize;
-      distance_for_guessed_keysize = normalized_distance;
-    }
+    keysizes_data.push(KeysizeMetadata(keysize, normalized_distance));
   }
 
-  return guessed_keysize;
+  // return the N best keysizes
+  std::vector<int> best_keysizes;
+  while (!keysizes_data.empty()) {
+    const KeysizeMetadata &top = keysizes_data.top();
+    best_keysizes.push_back(top.keysize_);
+    keysizes_data.pop();
+    if (best_keysizes.size() >= keysizes_count)
+      // we have collected enough keysizes
+      break;
+  }
+
+  return best_keysizes;
 }
 
 void break_blocks(const std::string &s, const int keysize, std::vector<std::string> *blocks) {
@@ -149,15 +184,12 @@ int main(int argc, char *argv[]) {
   }
   fprintf(stderr, "Decoded %ld bytes of input\n", decoded_input.size());
 
-  int keysize = try_find_keysize(decoded_input);
-  if (keysize < 0) {
-    fprintf(stderr, "Could not guess keysize\n");
-    return 1;
+  std::vector<int> keysizes = try_find_keysize(decoded_input, 5);
+  fprintf(stderr, "Guessed [%ld] keysizes:\n", keysizes.size());
+  for (int keysize: keysizes) {
+    fprintf(stderr, "Trying keysize [%d]\n", keysize);
+    try_decrypt(decoded_input, keysize);
   }
-  fprintf(stderr, "Guessed keysize of [%d]\n", keysize);
-
-  if (!try_decrypt(decoded_input, keysize))
-    return 1;
 
   return 0;
 }
