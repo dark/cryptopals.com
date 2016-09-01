@@ -151,13 +151,23 @@ bool try_decrypt(const std::string &s, const int keysize) {
   transpose_blocks(blocks, &transposed_blocks);
   //fprintf(stderr, "[%ld] transposed blocks created\n", transposed_blocks.size());
 
+  std::string key;
   for (size_t transposed_block_idx = 0; transposed_block_idx < transposed_blocks.size(); ++transposed_block_idx) {
     int one_byte_key;
     if (!try_all_xors(transposed_blocks[transposed_block_idx], &one_byte_key)) {
       fprintf(stderr, "Keysize [%d]: failed to guess byte [%ld] for the key\n", keysize, transposed_block_idx);
       return false;
     }
+    key.append(1, one_byte_key);
   }
+
+  fprintf(stderr, "Key found of length [%d]:", keysize);
+  for (unsigned char b: key)
+    fprintf(stderr, " %d", b);
+  fprintf(stderr, "\n");
+
+  std::string cleartext = repkey_xor(key, s);
+  fprintf(stderr, "Cleartext: [%.*s]\n", (int)cleartext.size(), cleartext.c_str());
 
   return true;
 }
@@ -188,7 +198,9 @@ int main(int argc, char *argv[]) {
   fprintf(stderr, "Guessed [%ld] keysizes:\n", keysizes.size());
   for (int keysize: keysizes) {
     fprintf(stderr, "Trying keysize [%d]\n", keysize);
-    try_decrypt(decoded_input, keysize);
+    if (try_decrypt(decoded_input, keysize))
+      // found it!
+      break;
   }
 
   return 0;

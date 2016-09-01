@@ -103,8 +103,9 @@ bool try_all_xors(const std::string &buf, int *mask) {
     // print nothing if highest score was 0
     return false;
 
-  fprintf(stderr, "Highest score was %d, obtained with mask %d (0x%x)\n",
-          highest_score, mask_for_highest_score, mask_for_highest_score);
+  if (0)
+    fprintf(stderr, "Highest score was %d, obtained with mask %d (0x%x)\n",
+            highest_score, mask_for_highest_score, mask_for_highest_score);
   *mask = mask_for_highest_score;
 
   if (0) {
@@ -117,4 +118,23 @@ bool try_all_xors(const std::string &buf, int *mask) {
   }
 
   return true;
+}
+
+std::string repkey_xor(const std::string &key, const std::string &s) {
+  std::string result;
+  result.reserve(s.size());
+
+  size_t buf_cursor = 0;
+  const size_t buf_size = s.size();
+
+  size_t key_cursor = 0;
+  const size_t key_size = key.size();
+  for (; buf_cursor < buf_size; ++buf_cursor) {
+    result.append(1, s[buf_cursor] ^ key[key_cursor]);
+
+    // advance key cursor
+    key_cursor = (key_cursor + 1) % key_size;
+  }
+
+  return std::move(result);
 }
