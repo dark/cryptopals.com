@@ -33,6 +33,7 @@ void read_buffer(std::string *buf) {
   }
 }
 
+// http://stackoverflow.com/q/16560720/1451820
 u_string decrypt(const u_string &ciphertext, const u_string &key) {
   EVP_CIPHER_CTX ctx;
   EVP_CIPHER_CTX_init(&ctx);
