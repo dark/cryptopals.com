@@ -1,6 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <map>
 #include <string>
+#include <vector>
 #include "repkey_xor.h"
 
 int char2int(int c) {
@@ -53,6 +55,37 @@ std::string read_one_line() {
   return s;
 }
 
+std::vector<std::string> chunk_it(const std::string &s, const size_t chunk_size) {
+  std::vector<std::string> chunks;
+
+  for (size_t cursor = 0; cursor < s.size(); cursor += chunk_size)
+    chunks.push_back(s.substr(cursor, chunk_size));
+
+  return chunks;
+}
+
+bool try_detect(const std::string &s) {
+  std::vector<std::string> chunks = chunk_it(s, 16);
+
+  // find frequencies of chunks
+  std::map<std::string, int> chunk_frequencies;
+  for (const std::string &c : chunks)
+    ++chunk_frequencies[c];
+
+  // print frequencies of chunks
+  int i = 0;
+  bool retval = false;
+  for (auto &f : chunk_frequencies) {
+    if (f.second != 1) {
+      fprintf(stderr, "  chunk idx %d has frequency %d\n", i, f.second);
+      retval = true;
+    }
+    ++i;
+  }
+
+  return retval;
+}
+
 int main (void) {
   while (true) {
     std::string buf = read_one_line();
@@ -61,6 +94,10 @@ int main (void) {
       break;
 
     fprintf(stderr, "ciphertext is %ld bytes long\n", buf.size());
+
+    if (try_detect(buf)) {
+      fprintf(stderr, "  ciphertext with repetitions: [%.*s]\n", (int)buf.size(), buf.c_str());
+    }
   }
 
   return 0;
